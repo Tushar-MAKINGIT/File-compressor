@@ -34,7 +34,19 @@ except FileNotFoundError:
     print("Warning: FFmpeg is not installed. Video compression will not work.")
 
 app = Flask(__name__, static_folder=frontend_dir, static_url_path='')
-CORS(app)  # Allow frontend to call this API
+
+# Configure CORS with specific settings for deployment
+CORS(app, resources={
+    r"/compress-image": {
+        "origins": ["*"],  # Allow all origins in production
+        "methods": ["POST"],
+        "allow_headers": ["Content-Type"]
+    },
+    r"/download/*": {
+        "origins": ["*"],
+        "methods": ["GET"]
+    }
+})
 
 # Configuration
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
