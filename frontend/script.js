@@ -310,10 +310,18 @@ form.addEventListener('submit', async (e) => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
-        const response = await fetch('/compress-image', {
+        // Get the base URL from the current window location
+        const baseUrl = window.location.origin;
+        const apiUrl = `${baseUrl}/compress-image`;
+
+        const response = await fetch(apiUrl, {
             method: "POST",
             body: formData,
-            signal: controller.signal
+            signal: controller.signal,
+            headers: {
+                'Accept': 'application/json'
+            },
+            credentials: 'include'  // Include cookies if needed
         });
 
         clearTimeout(timeoutId);
@@ -355,9 +363,15 @@ form.addEventListener('submit', async (e) => {
     } catch (error) {
         console.error('Compression error:', error);
         // Display error message in the result area
-        let errorMessage = error.name === 'AbortError' 
-            ? 'Compression timed out. Please try again with a smaller file or higher target size.'
-            : `Error: ${error.message}`;
+        let errorMessage;
+        
+        if (error.name === 'AbortError') {
+            errorMessage = 'Compression timed out. Please try again with a smaller file or higher target size.';
+        } else if (error.message.includes('Failed to fetch')) {
+            errorMessage = 'Unable to connect to the server. Please check your internet connection and try again.';
+        } else {
+            errorMessage = `Error: ${error.message}`;
+        }
         
         resultDiv.innerHTML = `<p class="error-message">${errorMessage}</p>`;
         resultDiv.style.display = 'block';
