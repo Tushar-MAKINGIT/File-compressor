@@ -279,23 +279,34 @@ class AdaptivePDFCompressor:
             else:
                 input_path = input_file
 
+            # Get original size in KB
+            original_size_kb = self.get_file_size_kb(input_path)
+
             # Convert target size from KB to MB for the core algorithm
             target_size_mb = target_size_kb / 1024
-            original_size_kb = self.get_file_size_kb(input_path)
 
             # Use the core algorithm to find optimal compression
             output_path, compressed_size_mb = self.find_optimal_compression(input_path, target_size_mb)
             
-            # Read the compressed file and prepare the response
+            # Calculate compression statistics
+            compressed_size_kb = compressed_size_mb * 1024
+            reduction_percent = ((original_size_kb - compressed_size_kb) / original_size_kb) * 100 if original_size_kb > 0 else 0
+            
+            # Read the compressed file into a buffer
             with open(output_path, 'rb') as f:
                 compressed_data = f.read()
+                compressed_buffer = io.BytesIO(compressed_data)
+                compressed_buffer.seek(0)
 
-            return io.BytesIO(compressed_data), {
+            # Prepare compression info
+            compression_info = {
                 'original_size': round(original_size_kb, 2),
-                'compressed_size': round(compressed_size_mb * 1024, 2),
-                'reduction_percent': round((1 - (compressed_size_mb * 1024) / original_size_kb) * 100, 2),
-                'quality': 'Original' if compressed_size_mb * 1024 >= original_size_kb else f'{int((compressed_size_mb * 1024 / original_size_kb) * 100)}%'
+                'compressed_size': round(compressed_size_kb, 2),
+                'reduction_percent': round(reduction_percent, 2),
+                'quality': 'Original' if compressed_size_kb >= original_size_kb else 'Compressed'
             }
+
+            return compressed_buffer, compression_info
 
         finally:
             self.cleanup()
