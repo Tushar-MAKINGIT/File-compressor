@@ -75,13 +75,19 @@ def run_ffmpeg_compression(
     Compress video using FFmpeg with specified bitrates and optional dimensions.
     """
     try:
+        # Calculate appropriate buffer size (typically 2-4 times the bitrate)
+        # Ensure it's within valid range
+        max_buffer_size = 2 * 1024 * 1024 * 1024  # 2GB max buffer size
+        buffer_size = min(int(video_bitrate * 2), max_buffer_size)
+
         # Base command
         command = [
             "ffmpeg", "-y",
             "-i", input_path,
             "-b:v", str(int(video_bitrate)),
             "-b:a", str(int(audio_bitrate)),
-            "-bufsize", str(int(video_bitrate)),
+            "-bufsize", str(buffer_size),
+            "-maxrate", str(int(video_bitrate * 1.5)),  # Add maxrate to prevent buffer overflow
             "-preset", "fast",
             "-movflags", "+faststart",
             "-loglevel", "error"
@@ -143,6 +149,11 @@ def compress_video_to_target(input_path: str, max_size_mb: float, processed_fold
         audio_bitrate = 128000  # 128 kbps for audio
         video_bitrate = ((target_bytes * 8) / duration) - audio_bitrate
 
+        # Ensure video bitrate is within reasonable limits
+        min_bitrate = 100000  # 100 kbps minimum
+        max_bitrate = 8000000  # 8 Mbps maximum
+        video_bitrate = max(min_bitrate, min(video_bitrate, max_bitrate))
+
         # Output file path
         output_filename = f"{uuid.uuid4().hex}.{format}"
         output_path = os.path.join(processed_folder, output_filename)
@@ -172,6 +183,9 @@ def compress_video_to_target(input_path: str, max_size_mb: float, processed_fold
             else:
                 video_bitrate *= 1.1  # Increase bitrate if too small
 
+            # Ensure bitrate stays within limits
+            video_bitrate = max(min_bitrate, min(video_bitrate, max_bitrate))
+
             run_ffmpeg_compression(input_path, output_path, video_bitrate, audio_bitrate, 
                                  width, height, format)
             final_size = os.path.getsize(output_path)
@@ -182,7 +196,7 @@ def compress_video_to_target(input_path: str, max_size_mb: float, processed_fold
             # If still too large, use minimum buffer
             target_size_mb = max_size_mb - BUFFER_MAX
             target_bytes = target_size_mb * 1024 * 1024
-            video_bitrate = ((target_bytes * 8) / duration) - audio_bitrate
+            video_bitrate = max(min_bitrate, min(((target_bytes * 8) / duration) - audio_bitrate, max_bitrate))
             run_ffmpeg_compression(input_path, output_path, video_bitrate, audio_bitrate, 
                                  width, height, format)
             final_size = os.path.getsize(output_path)
