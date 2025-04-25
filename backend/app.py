@@ -170,6 +170,12 @@ def compress_file():
                 original_name = secure_filename(file.filename)
                 name_without_ext = os.path.splitext(original_name)[0]
                 new_filename = f"{name_without_ext}_compressed.pdf"
+
+                # Save the compressed PDF
+                output_path = os.path.join(PROCESSED_FOLDER, new_filename)
+                with open(output_path, 'wb') as f:
+                    f.write(compressed_buffer.getvalue())
+                compressed_buffer.seek(0)
             else:  # video
                 logger.info(f'Starting video compression for {file.filename}')
                 # Save the uploaded video temporarily
