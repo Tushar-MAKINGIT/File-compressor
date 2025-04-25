@@ -303,18 +303,48 @@ form.addEventListener('submit', async (e) => {
     formData.append("file", file);
     formData.append("target_size_kb", targetSizeKB);
     formData.append("file_type", fileType);
+    formData.append("size_format", sizeFormat);
 
     try {
-        // Use the correct backend endpoint
+        // Use the correct backend endpoint with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+
         const response = await fetch('/compress-image', {
             method: "POST",
             body: formData,
+            signal: controller.signal
         });
 
-        const data = await response.json();
-        
+        clearTimeout(timeoutId);
+
+        // First check if the response is ok
         if (!response.ok) {
-            throw new Error(data.error || 'Compression failed');
+            const errorText = await response.text();
+            let errorMessage;
+            try {
+                const errorData = JSON.parse(errorText);
+                errorMessage = errorData.error || 'Compression failed';
+            } catch (parseError) {
+                console.error('Error parsing error response:', errorText);
+                errorMessage = 'Compression failed - server error';
+            }
+            throw new Error(errorMessage);
+        }
+
+        // Try to parse the successful response
+        let data;
+        try {
+            const responseText = await response.text();
+            console.log('Raw response:', responseText); // Debug log
+            data = JSON.parse(responseText);
+        } catch (parseError) {
+            console.error('Error parsing success response:', parseError);
+            throw new Error('Failed to parse server response');
+        }
+
+        if (!data || !data.compression_info) {
+            throw new Error('Invalid response format from server');
         }
 
         // Show compression results
@@ -323,8 +353,13 @@ form.addEventListener('submit', async (e) => {
         currentDownloadUrl = `/download/${encodeURIComponent(data.filename)}`;
         
     } catch (error) {
+        console.error('Compression error:', error);
         // Display error message in the result area
-        resultDiv.innerHTML = `<p class="error-message">Error: ${error.message}</p>`;
+        let errorMessage = error.name === 'AbortError' 
+            ? 'Compression timed out. Please try again with a smaller file or higher target size.'
+            : `Error: ${error.message}`;
+        
+        resultDiv.innerHTML = `<p class="error-message">${errorMessage}</p>`;
         resultDiv.style.display = 'block';
         downloadBtn.style.display = 'none';
         currentDownloadUrl = null;
