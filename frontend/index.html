@@ -1,0 +1,93 @@
+<!DOCTYPE html> 
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>File Compressor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>File Compressor</h1>
+        <p class="description">Compress your files while maintaining quality. Supports various file formats.</p>
+
+        <form id="upload-form" method="POST" enctype="multipart/form-data">
+            <div class="input-group">
+                <label for="file-type">Select File Type:</label>
+                <select id="file-type" name="file_type" required>
+                    <option value="" disabled selected>Choose file type</option>
+                    <option value="image">Image</option>
+                    <option value="video">Video</option>
+                    <option value="pdf">PDF</option>
+                </select>
+            </div>
+
+            <div class="drop-zone" id="drop-zone">
+                <span id="drop-text">Select a file type above first</span>
+                <input 
+                    type="file" 
+                    name="file" 
+                    id="file-input" 
+                    disabled
+                    required 
+                >
+            </div>
+
+            <div id="file-info" class="file-info" style="display: none;"></div>
+
+            <div class="input-group">
+                <label for="target-size">Maximum Size:</label>
+                <div class="size-input-container">
+                    <input 
+                        type="number" 
+                        id="target-size" 
+                        name="target_size_kb"
+                        min="5"
+                        value=""
+                        placeholder="e.g., 20"
+                        required
+                    >
+                    <select id="size-format" name="size_format">
+                        <option value="kb">KB</option>
+                        <option value="mb">MB</option>
+                    </select>
+                </div>
+                <small id="size-help-text" class="help-text">Minimum: 20KB. File will be compressed to slightly below this size.</small>
+            </div>
+
+            <button type="submit" id="compress-btn" disabled>Compress File</button>
+            <div class="loader" id="loader" style="display: none;"></div>
+
+            <div id="compression-result" class="compression-result" style="display: none;"></div>
+            
+            <button type="button" id="download-btn" class="download-btn" style="display: none;">
+                Download Compressed File
+            </button>
+        </form>
+    </div>
+
+    <script src="script.js"></script>
+    <script>
+        document.getElementById('file-type').addEventListener('change', function() {
+            const fileType = this.value;
+            const sizeInput = document.getElementById('target-size');
+            const helpText = document.getElementById('size-help-text');
+            const sizeFormat = document.getElementById('size-format');
+            
+            if (fileType === 'video') {
+                sizeFormat.value = 'mb';
+                sizeFormat.disabled = true;
+                sizeInput.min = 5;
+                helpText.textContent = 'Minimum: 5MB. File will be compressed to slightly below this size.';
+            } else if (fileType === 'image' || fileType === 'pdf') {
+                if (sizeFormat.value === 'mb') {
+                    sizeInput.min = 1;
+                    helpText.textContent = 'Minimum: 1MB. File will be compressed to slightly below this size. If you want to compress even more, switch to KB.';
+                } else {
+                    sizeInput.min = 20;
+                    helpText.textContent = 'Minimum: 20KB. File will be compressed to slightly below this size.';
+                }
+            }
+        });
+    </script>
+</body>
+</html>

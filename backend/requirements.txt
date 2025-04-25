@@ -1,0 +1,13 @@
+Flask==2.0.1
+Pillow==9.5.0
+flask-cors==3.0.10
+# python-dotenv==1.0.1 # Removed as it doesn't seem to be used
+Werkzeug==2.2.3
+# Note: Ghostscript must be installed separately on the system
+# Windows: https://ghostscript.com/releases/gsdnld.html
+# Linux: apt-get install ghostscript
+# macOS: brew install ghostscript
+ghostscript==0.7
+python-magic==0.4.27
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
