@@ -75,10 +75,9 @@ def run_ffmpeg_compression(
     Compress video using FFmpeg with specified bitrates and optional dimensions.
     """
     try:
-        # Calculate appropriate buffer size (typically 2-4 times the bitrate)
-        # Ensure it's within valid range
-        max_buffer_size = 2 * 1024 * 1024 * 1024  # 2GB max buffer size
-        buffer_size = min(int(video_bitrate * 2), max_buffer_size)
+        # Calculate buffer size as a fraction of the video bitrate
+        # Use a more conservative approach to stay within FFmpeg's limits
+        buffer_size = min(int(video_bitrate * 1.5), 2000000)  # Max 2M buffer size
 
         # Base command
         command = [
@@ -87,7 +86,7 @@ def run_ffmpeg_compression(
             "-b:v", str(int(video_bitrate)),
             "-b:a", str(int(audio_bitrate)),
             "-bufsize", str(buffer_size),
-            "-maxrate", str(int(video_bitrate * 1.5)),  # Add maxrate to prevent buffer overflow
+            "-maxrate", str(int(video_bitrate * 1.2)),  # More conservative maxrate
             "-preset", "fast",
             "-movflags", "+faststart",
             "-loglevel", "error"
@@ -151,7 +150,7 @@ def compress_video_to_target(input_path: str, max_size_mb: float, processed_fold
 
         # Ensure video bitrate is within reasonable limits
         min_bitrate = 100000  # 100 kbps minimum
-        max_bitrate = 8000000  # 8 Mbps maximum
+        max_bitrate = 4000000  # 4 Mbps maximum (reduced from 8Mbps)
         video_bitrate = max(min_bitrate, min(video_bitrate, max_bitrate))
 
         # Output file path
