@@ -9,6 +9,12 @@ from werkzeug.utils import secure_filename
 import io
 # import json # Unused
 from PIL import Image
+import logging
+import traceback
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Get the directory where app.py is located
 backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -70,132 +76,165 @@ def serve_static(path):
 
 @app.route('/compress-image', methods=['POST'])
 def compress_file():
-    # Validate request has file
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
-    
-    file = request.files['file']
-    if not file or file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-
-    file_type = request.form.get('file_type', 'image')
-    if not allowed_file(file.filename, file_type):
-        allowed_extensions = (
-            ALLOWED_IMAGE_EXTENSIONS if file_type == 'image' 
-            else ALLOWED_PDF_EXTENSIONS if file_type == 'pdf'
-            else ALLOWED_VIDEO_EXTENSIONS
-        )
-        return jsonify({'error': f'Unsupported file type. Please upload {", ".join(allowed_extensions)} files.'}), 400
-
-    # Check ffmpeg installation for video compression
-    if file_type == 'video' and not FFMPEG_INSTALLED:
-        return jsonify({'error': 'FFmpeg is not installed. Please install FFmpeg to compress videos.'}), 500
-
-    # Validate target size
     try:
-        max_size = float(request.form.get('target_size_kb', 500))
-        size_format = request.form.get('size_format', 'kb').lower()
+        # Validate request has file
+        if 'file' not in request.files:
+            logger.error('No file part in request')
+            return jsonify({'error': 'No file uploaded'}), 400
         
-        # Convert to KB if needed and enforce minimum limits
-        if size_format == 'mb':
-            if max_size < 1:
-                return jsonify({'error': 'Target size must be at least 1MB when using MB format'}), 400
-            max_size_kb = int(max_size * 1024)  # Convert MB to KB
+        file = request.files['file']
+        if not file or file.filename == '':
+            logger.error('No file selected')
+            return jsonify({'error': 'No file selected'}), 400
+
+        file_type = request.form.get('file_type', 'image')
+        logger.info(f'Processing {file_type} file: {file.filename}')
+
+        if not allowed_file(file.filename, file_type):
+            allowed_extensions = (
+                ALLOWED_IMAGE_EXTENSIONS if file_type == 'image' 
+                else ALLOWED_PDF_EXTENSIONS if file_type == 'pdf'
+                else ALLOWED_VIDEO_EXTENSIONS
+            )
+            logger.error(f'Invalid file type: {file.filename}')
+            return jsonify({'error': f'Unsupported file type. Please upload {", ".join(allowed_extensions)} files.'}), 400
+
+        # Check ffmpeg installation for video compression
+        if file_type == 'video' and not FFMPEG_INSTALLED:
+            logger.error('FFmpeg not installed')
+            return jsonify({'error': 'FFmpeg is not installed. Please install FFmpeg to compress videos.'}), 500
+
+        # Validate target size
+        try:
+            max_size = float(request.form.get('target_size_kb', 500))
+            size_format = request.form.get('size_format', 'kb').lower()
+            
+            # Convert to KB if needed and enforce minimum limits
+            if size_format == 'mb':
+                if max_size < 1:
+                    return jsonify({'error': 'Target size must be at least 1MB when using MB format'}), 400
+                max_size_kb = int(max_size * 1024)  # Convert MB to KB
+            else:
+                if max_size < 20:
+                    return jsonify({'error': 'Target size must be at least 20KB when using KB format'}), 400
+                max_size_kb = int(max_size)
+                
+            if max_size_kb < MIN_TARGET_SIZE:
+                return jsonify({'error': f'Target size must be at least {MIN_TARGET_SIZE}KB'}), 400
+        except ValueError as e:
+            logger.error(f'Invalid target size format: {str(e)}')
+            return jsonify({'error': 'Invalid target size format'}), 400
+
+        # Check file size
+        file.seek(0, 2)  # Seek to end
+        size = file.tell()
+        file.seek(0)
+        
+        if file_type == 'video':
+            if size > MAX_VIDEO_SIZE:
+                logger.error(f'Video file too large: {size} bytes')
+                return jsonify({'error': f'Video file too large (max {MAX_VIDEO_SIZE // 1024 // 1024}MB)'}), 400
         else:
-            if max_size < 20:
-                return jsonify({'error': 'Target size must be at least 20KB when using KB format'}), 400
-            max_size_kb = int(max_size)
-            
-        if max_size_kb < MIN_TARGET_SIZE:
-            return jsonify({'error': f'Target size must be at least {MIN_TARGET_SIZE}KB'}), 400
-    except ValueError:
-        return jsonify({'error': 'Invalid target size format'}), 400
+            if size > MAX_FILE_SIZE:
+                logger.error(f'File too large: {size} bytes')
+                return jsonify({'error': f'File too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)'}), 400
 
-    # Check file size
-    file.seek(0, 2)  # Seek to end
-    size = file.tell()
-    file.seek(0)  # Reset to beginning
-    
-    if file_type == 'video':
-        if size > MAX_VIDEO_SIZE:
-            return jsonify({'error': f'Video file too large (max {MAX_VIDEO_SIZE // 1024 // 1024}MB)'}), 400
-    else:
-        if size > MAX_FILE_SIZE:
-            return jsonify({'error': f'File too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)'}), 400
+        try:
+            # Ensure upload and processed folders exist
+            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+            os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
-    try:
-        if file_type == 'image':
-            # Compress the image
-            compressed_buffer, new_filename, compression_info = compress_image(file, max_size_kb)
-        elif file_type == 'pdf':
-            # Initialize PDF compressor
-            pdf_compressor = AdaptivePDFCompressor()
+            if file_type == 'image':
+                # Compress the image
+                compressed_buffer, new_filename, compression_info = compress_image(file, max_size_kb)
+            elif file_type == 'pdf':
+                # Initialize PDF compressor
+                pdf_compressor = AdaptivePDFCompressor()
+                
+                # Compress the PDF
+                compressed_buffer, compression_info = pdf_compressor.compress_to_target_size(file, max_size_kb)
+                
+                # Generate filename for compressed PDF
+                original_name = secure_filename(file.filename)
+                name_without_ext = os.path.splitext(original_name)[0]
+                new_filename = f"{name_without_ext}_compressed.pdf"
+            else:  # video
+                logger.info(f'Starting video compression for {file.filename}')
+                # Save the uploaded video temporarily
+                temp_input = os.path.join(UPLOAD_FOLDER, secure_filename(file.filename))
+                file.save(temp_input)
+                
+                # Convert target size from KB to MB for video compression
+                target_size_mb = max_size_kb / 1024
+                
+                try:
+                    # Compress the video
+                    output_path, final_size_mb = compress_video_to_target(temp_input, target_size_mb, PROCESSED_FOLDER)
+                    
+                    # Read the compressed video
+                    with open(output_path, 'rb') as f:
+                        compressed_buffer = io.BytesIO(f.read())
+                    
+                    # Generate filename for compressed video
+                    original_name = secure_filename(file.filename)
+                    name_without_ext = os.path.splitext(original_name)[0]
+                    original_ext = os.path.splitext(original_name)[1].lower()
+                    new_filename = f"{name_without_ext}_compressed{original_ext}"
+                    
+                    # Clean up temporary files
+                    if os.path.exists(temp_input):
+                        os.remove(temp_input)
+                    if os.path.exists(output_path):
+                        os.remove(output_path)
+                    
+                    # Prepare compression info
+                    compression_info = {
+                        'original_size': round(size / 1024, 2),
+                        'compressed_size': round(final_size_mb * 1024, 2),
+                        'reduction_percent': round((1 - (final_size_mb * 1024) / (size / 1024)) * 100, 2),
+                        'quality': 'Original' if final_size_mb * 1024 >= size / 1024 else f'{int((final_size_mb * 1024) / (size / 1024) * 100)}%'
+                    }
+                except Exception as e:
+                    logger.error(f'Video compression error: {str(e)}')
+                    logger.error(traceback.format_exc())
+                    # Clean up temporary files in case of error
+                    if os.path.exists(temp_input):
+                        os.remove(temp_input)
+                    raise
             
-            # Compress the PDF
-            compressed_buffer, compression_info = pdf_compressor.compress_to_target_size(file, max_size_kb)
+            # Store the compressed file temporarily
+            temp_path = os.path.join(UPLOAD_FOLDER, new_filename)
+            logger.info(f'Saving compressed file to: {temp_path}')
             
-            # Generate filename for compressed PDF
-            original_name = secure_filename(file.filename)
-            name_without_ext = os.path.splitext(original_name)[0]
-            new_filename = f"{name_without_ext}_compressed.pdf"
-        else:  # video
-            # Save the uploaded video temporarily
-            temp_input = os.path.join(UPLOAD_FOLDER, secure_filename(file.filename))
-            file.save(temp_input)
+            with open(temp_path, 'wb') as f:
+                f.write(compressed_buffer.getvalue())
             
-            # Convert target size from KB to MB for video compression
-            target_size_mb = max_size_kb / 1024
+            # Verify file was saved
+            if not os.path.exists(temp_path):
+                logger.error(f'Failed to save compressed file at: {temp_path}')
+                return jsonify({'error': 'Failed to save compressed file'}), 500
+                
+            logger.info(f'File saved successfully at: {temp_path}')
             
-            # Compress the video
-            output_path, final_size_mb = compress_video_to_target(temp_input, target_size_mb, PROCESSED_FOLDER)
-            
-            # Read the compressed video
-            with open(output_path, 'rb') as f:
-                compressed_buffer = io.BytesIO(f.read())
-            
-            # Generate filename for compressed video
-            original_name = secure_filename(file.filename)
-            name_without_ext = os.path.splitext(original_name)[0]
-            original_ext = os.path.splitext(original_name)[1].lower()
-            new_filename = f"{name_without_ext}_compressed{original_ext}"
-            
-            # Clean up temporary files
-            os.remove(temp_input)
-            os.remove(output_path)
-            
-            # Prepare compression info
-            compression_info = {
-                'original_size': round(size / 1024, 2),
-                'compressed_size': round(final_size_mb * 1024, 2),
-                'reduction_percent': round((1 - (final_size_mb * 1024) / (size / 1024)) * 100, 2),
-                'quality': 'Original' if final_size_mb * 1024 >= size / 1024 else f'{int((final_size_mb * 1024) / (size / 1024) * 100)}%'
+            # Return success response with compression info and file path
+            response_data = {
+                'status': 'success',
+                'filename': new_filename,
+                'compression_info': compression_info,
+                'download_url': f'/download/{new_filename}'
             }
-        
-        # Store the compressed file temporarily
-        temp_path = os.path.join(UPLOAD_FOLDER, new_filename)
-        print(f"Saving compressed file to: {temp_path}")  # Debug log
-        print(f"Upload folder exists: {os.path.exists(UPLOAD_FOLDER)}")  # Debug log
-        
-        with open(temp_path, 'wb') as f:
-            f.write(compressed_buffer.getvalue())
-        
-        # Verify file was saved
-        if not os.path.exists(temp_path):
-            return jsonify({'error': 'Failed to save compressed file'}), 500
+            logger.info(f'Compression successful: {response_data}')
+            return jsonify(response_data)
             
-        print(f"File saved successfully: {os.path.exists(temp_path)}")  # Debug log
-        
-        # Return success response with compression info and file path
-        return jsonify({
-            'status': 'success',
-            'filename': new_filename,
-            'compression_info': compression_info,
-            'download_url': f'/download/{new_filename}'
-        })
-        
+        except Exception as e:
+            logger.error(f'Error during compression: {str(e)}')
+            logger.error(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
+            
     except Exception as e:
-        print(f"Error during compression: {str(e)}")  # Debug log
-        return jsonify({'error': str(e)}), 500
+        logger.error(f'Unexpected error: {str(e)}')
+        logger.error(traceback.format_exc())
+        return jsonify({'error': 'An unexpected error occurred'}), 500
 
 @app.route('/download/<path:filename>')
 def download_file(filename):
