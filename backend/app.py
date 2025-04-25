@@ -1,7 +1,7 @@
 from flask import Flask, request, send_file, jsonify, send_from_directory
-from utils.image_compressor import compress_image, get_file_size
-from utils.pdf_compressor import AdaptivePDFCompressor
-from utils.video_compressor import compress_video_to_target
+from .utils.image_compressor import compress_image, get_file_size
+from .utils.pdf_compressor import AdaptivePDFCompressor
+from .utils.video_compressor import compress_video_to_target
 from flask_cors import CORS
 import os
 import subprocess
