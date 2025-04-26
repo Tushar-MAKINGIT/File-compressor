@@ -257,7 +257,7 @@ class AdaptivePDFCompressor:
         Compress a PDF file to a target size in KB.
         
         Args:
-            input_file: File object or path to the input PDF
+            input_file: FileStorage object, file object, or path to the input PDF
             target_size_kb: Target size in KB
             
         Returns:
@@ -266,13 +266,16 @@ class AdaptivePDFCompressor:
         try:
             # Create a temporary file for the input
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_input:
-                if isinstance(input_file, io.IOBase):
-                    # If input is a file object, save its contents to the temp file
+                # Handle Flask FileStorage objects
+                if hasattr(input_file, 'save'):
+                    input_file.save(temp_input.name)
+                # Handle file-like objects
+                elif hasattr(input_file, 'read'):
                     input_file.seek(0)  # Ensure we're at the start of the file
                     temp_input.write(input_file.read())
                     input_file.seek(0)  # Reset file pointer for potential future use
+                # Handle file paths
                 else:
-                    # If input is a path, copy the file
                     with open(input_file, 'rb') as f:
                         temp_input.write(f.read())
                 temp_input_path = temp_input.name
