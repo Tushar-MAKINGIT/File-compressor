@@ -283,49 +283,61 @@ class AdaptivePDFCompressor:
                         temp_input.write(f.read())
                 temp_input_path = temp_input.name
 
-            # Get the original file size in KB before any processing
-            original_size_kb = self.get_file_size_kb(temp_input_path)
-            self.log(f"Original file size: {original_size_kb:.2f} KB")
+            # Get the original file size in bytes
+            original_size_bytes = os.path.getsize(temp_input_path)
+            original_size_kb = original_size_bytes / 1024
+            self.log(f"Original file size: {original_size_kb:.2f} KB ({original_size_bytes} bytes)")
             
             # Convert target size from KB to MB for the compression function
             target_size_mb = target_size_kb / 1024  # Convert KB to MB
             self.log(f"Target size: {target_size_mb:.2f} MB")
             
+            # Create a temporary directory for compression
+            self.temp_dir = tempfile.mkdtemp()
+            compressed_path = os.path.join(self.temp_dir, "compressed.pdf")
+            
             # Find optimal compression
-            compressed_path, final_size_mb = self.find_optimal_compression(
-                temp_input_path,
-                target_size_mb
-            )
-            
-            # Get the actual size of the compressed file
-            final_size_kb = self.get_file_size_kb(compressed_path)
-            self.log(f"Final compressed size: {final_size_kb:.2f} KB")
-            
-            # Read the compressed file into a buffer
-            with open(compressed_path, 'rb') as f:
-                compressed_buffer = io.BytesIO(f.read())
-            
-            # Calculate compression info with more precise calculations
-            reduction_percent = ((original_size_kb - final_size_kb) / original_size_kb) * 100
-            quality_percent = (final_size_kb / original_size_kb) * 100
-            
-            compression_info = {
-                'original_size': round(original_size_kb, 2),
-                'compressed_size': round(final_size_kb, 2),
-                'reduction_percent': round(reduction_percent, 2),
-                'quality': 'Original' if final_size_kb >= original_size_kb else f'{int(quality_percent)}%'
-            }
-            
-            self.log(f"Compression results: {compression_info}")
-            
-            # Clean up temporary files
             try:
-                os.unlink(temp_input_path)
-                os.unlink(compressed_path)
-            except Exception as e:
-                self.log(f"Warning: Error cleaning up temporary files: {e}")
-            
-            return compressed_buffer, compression_info
+                compressed_path, final_size_mb = self.find_optimal_compression(
+                    temp_input_path,
+                    target_size_mb,
+                    compressed_path
+                )
+                
+                # Get the actual size of the compressed file in bytes
+                final_size_bytes = os.path.getsize(compressed_path)
+                final_size_kb = final_size_bytes / 1024
+                self.log(f"Final compressed size: {final_size_kb:.2f} KB ({final_size_bytes} bytes)")
+                
+                # Read the compressed file into a buffer
+                with open(compressed_path, 'rb') as f:
+                    compressed_buffer = io.BytesIO(f.read())
+                
+                # Calculate compression info with more precise calculations
+                reduction_percent = ((original_size_kb - final_size_kb) / original_size_kb) * 100
+                quality_percent = (final_size_kb / original_size_kb) * 100
+                
+                compression_info = {
+                    'original_size': round(original_size_kb, 2),
+                    'compressed_size': round(final_size_kb, 2),
+                    'reduction_percent': round(reduction_percent, 2),
+                    'quality': 'Original' if final_size_kb >= original_size_kb else f'{int(quality_percent)}%'
+                }
+                
+                self.log(f"Compression results: {compression_info}")
+                
+                return compressed_buffer, compression_info
+                
+            finally:
+                # Clean up temporary files
+                try:
+                    os.unlink(temp_input_path)
+                    if os.path.exists(compressed_path):
+                        os.unlink(compressed_path)
+                    if self.temp_dir and os.path.exists(self.temp_dir):
+                        shutil.rmtree(self.temp_dir)
+                except Exception as e:
+                    self.log(f"Warning: Error cleaning up temporary files: {e}")
             
         except Exception as e:
             self.log(f"Error during compression: {e}")
@@ -335,6 +347,8 @@ class AdaptivePDFCompressor:
                     os.unlink(temp_input_path)
                 if 'compressed_path' in locals() and os.path.exists(compressed_path):
                     os.unlink(compressed_path)
+                if self.temp_dir and os.path.exists(self.temp_dir):
+                    shutil.rmtree(self.temp_dir)
             except Exception as cleanup_error:
                 self.log(f"Error during cleanup: {cleanup_error}")
             raise
