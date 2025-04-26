@@ -267,8 +267,11 @@ class AdaptivePDFCompressor:
             # Create a temporary file for the input
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_input:
                 # Handle Flask FileStorage objects
-                if hasattr(input_file, 'save'):
-                    input_file.save(temp_input.name)
+                if hasattr(input_file, 'stream'):
+                    # Use the stream property of FileStorage
+                    input_file.stream.seek(0)
+                    temp_input.write(input_file.stream.read())
+                    input_file.stream.seek(0)
                 # Handle file-like objects
                 elif hasattr(input_file, 'read'):
                     input_file.seek(0)  # Ensure we're at the start of the file
