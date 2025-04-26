@@ -254,104 +254,51 @@ class AdaptivePDFCompressor:
 
     def compress_to_target_size(self, input_file, target_size_kb):
         """
-        Compress a PDF file to a target size in KB.
+        Web interface method to compress a PDF file to meet a target size.
         
         Args:
-            input_file: FileStorage object, file object, or path to the input PDF
-            target_size_kb: Target size in KB
+            input_file: File-like object or path to the PDF file
+            target_size_kb: Target size in kilobytes
             
         Returns:
             tuple: (compressed_buffer, compression_info)
+                - compressed_buffer: BytesIO object containing the compressed PDF
+                - compression_info: dict with compression statistics
         """
+        # Create temporary directory for processing
+        self.temp_dir = tempfile.mkdtemp()
+        
         try:
-            # Create a temporary file for the input
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_input:
-                # Handle Flask FileStorage objects
-                if hasattr(input_file, 'stream'):
-                    # Use the stream property of FileStorage
-                    input_file.stream.seek(0)
-                    temp_input.write(input_file.stream.read())
-                    input_file.stream.seek(0)
-                # Handle file-like objects
-                elif hasattr(input_file, 'read'):
-                    input_file.seek(0)  # Ensure we're at the start of the file
-                    temp_input.write(input_file.read())
-                    input_file.seek(0)  # Reset file pointer for potential future use
-                # Handle file paths
-                else:
-                    with open(input_file, 'rb') as f:
-                        temp_input.write(f.read())
-                temp_input_path = temp_input.name
+            # Save input file if it's a file-like object
+            if hasattr(input_file, 'read'):
+                temp_input = os.path.join(self.temp_dir, "input.pdf")
+                input_file.seek(0)
+                with open(temp_input, 'wb') as f:
+                    f.write(input_file.read())
+                input_path = temp_input
+            else:
+                input_path = input_file
 
-            # Get the original file size in bytes
-            original_size_bytes = os.path.getsize(temp_input_path)
-            original_size_kb = original_size_bytes / 1024
-            self.log(f"Original file size: {original_size_kb:.2f} KB ({original_size_bytes} bytes)")
+            # Convert target size from KB to MB for the core algorithm
+            target_size_mb = target_size_kb / 1024
+            original_size_kb = self.get_file_size_kb(input_path)
+
+            # Use the core algorithm to find optimal compression
+            output_path, compressed_size_mb = self.find_optimal_compression(input_path, target_size_mb)
             
-            # Convert target size from KB to MB for the compression function
-            target_size_mb = target_size_kb / 1024  # Convert KB to MB
-            self.log(f"Target size: {target_size_mb:.2f} MB")
-            
-            # Create a temporary directory for compression
-            self.temp_dir = tempfile.mkdtemp()
-            compressed_path = os.path.join(self.temp_dir, "compressed.pdf")
-            
-            # Find optimal compression
-            try:
-                compressed_path, final_size_mb = self.find_optimal_compression(
-                    temp_input_path,
-                    target_size_mb,
-                    compressed_path
-                )
-                
-                # Get the actual size of the compressed file in bytes
-                final_size_bytes = os.path.getsize(compressed_path)
-                final_size_kb = final_size_bytes / 1024
-                self.log(f"Final compressed size: {final_size_kb:.2f} KB ({final_size_bytes} bytes)")
-                
-                # Read the compressed file into a buffer
-                with open(compressed_path, 'rb') as f:
-                    compressed_buffer = io.BytesIO(f.read())
-                
-                # Calculate compression info with more precise calculations
-                reduction_percent = ((original_size_kb - final_size_kb) / original_size_kb) * 100
-                quality_percent = (final_size_kb / original_size_kb) * 100
-                
-                compression_info = {
-                    'original_size': round(original_size_kb, 2),
-                    'compressed_size': round(final_size_kb, 2),
-                    'reduction_percent': round(reduction_percent, 2),
-                    'quality': 'Original' if final_size_kb >= original_size_kb else f'{int(quality_percent)}%'
-                }
-                
-                self.log(f"Compression results: {compression_info}")
-                
-                return compressed_buffer, compression_info
-                
-            finally:
-                # Clean up temporary files
-                try:
-                    os.unlink(temp_input_path)
-                    if os.path.exists(compressed_path):
-                        os.unlink(compressed_path)
-                    if self.temp_dir and os.path.exists(self.temp_dir):
-                        shutil.rmtree(self.temp_dir)
-                except Exception as e:
-                    self.log(f"Warning: Error cleaning up temporary files: {e}")
-            
-        except Exception as e:
-            self.log(f"Error during compression: {e}")
-            # Clean up any temporary files that might have been created
-            try:
-                if 'temp_input_path' in locals() and os.path.exists(temp_input_path):
-                    os.unlink(temp_input_path)
-                if 'compressed_path' in locals() and os.path.exists(compressed_path):
-                    os.unlink(compressed_path)
-                if self.temp_dir and os.path.exists(self.temp_dir):
-                    shutil.rmtree(self.temp_dir)
-            except Exception as cleanup_error:
-                self.log(f"Error during cleanup: {cleanup_error}")
-            raise
+            # Read the compressed file and prepare the response
+            with open(output_path, 'rb') as f:
+                compressed_data = f.read()
+
+            return io.BytesIO(compressed_data), {
+                'original_size': round(original_size_kb, 2),
+                'compressed_size': round(compressed_size_mb * 1024, 2),
+                'reduction_percent': round((1 - (compressed_size_mb * 1024) / original_size_kb) * 100, 2),
+                'quality': 'Original' if compressed_size_mb * 1024 >= original_size_kb else f'{int((compressed_size_mb * 1024 / original_size_kb) * 100)}%'
+            }
+
+        finally:
+            self.cleanup()
 
 def main():
     parser = argparse.ArgumentParser(description="Adaptive PDF Compressor")
